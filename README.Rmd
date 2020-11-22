@@ -1,0 +1,122 @@
+---
+author: "David Marquinez"
+output:
+  html_document:
+    keep_md: yes
+  pdf_document: default
+title: "Prediction Assignment"
+---
+```{r setup, warning= FALSE , include= FALSE , echo = TRUE}
+library(R.utils)
+library(ggplot2)
+library(plyr)
+library(GGally)
+library(caret)
+library(rattle)
+library(parallel)
+library(doParallel)
+library(rpart.plot)
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+data("mtcars")
+colorize <- function(x, color) {
+  if (knitr::is_latex_output()) {
+    sprintf("\\textcolor{%s}{%s}", color, x)
+  } else if (knitr::is_html_output()) {
+    sprintf("<span style='color: %s;'>%s</span>", color, 
+            x)
+  } else x
+}
+```
+# Abstract
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. We will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+# Goal
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set:
+* exactly according to the specification (Class A).  
+* throwing the elbows to the front (Class B).  
+* lifting the dumbbell only halfway (Class C).  
+* lowering the dumbbell only halfway (Class D).  
+* throwing the hips to the front (Class E).  
+
+# Data
+
+First, we will download the training and test data.
+```{r echo=TRUE, cache=TRUE}
+if(!file.exists("pml-training.csv"))
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","pml-training.csv")
+if(!file.exists("pml-testing.csv"))
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","pml-testing.csv")
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+If we take a first look to the data, we can remove some unnecesary variables that will not be necessary to our model. We will only consider variables related to measurements in x,y,z axis.
+```{r echo=TRUE, cache=TRUE}
+names(training)
+xyzattr <- names(training)[grepl("x$|y$|z$",names(training))]
+testingData <- testing[,xyzattr]
+xyzattr <- c(xyzattr,"classe")
+trainingData <- training[,xyzattr]
+trainingData$classe <- as.factor(trainingData$classe)
+```
+
+# Models
+
+## Recursive Partitioning  
+Recursive partitioning is a statistical method for multivariable analysis. Recursive partitioning creates a decision tree that strives to correctly classify members of the population by splitting it into sub-populations based on several dichotomous independent variables. The process is termed recursive because each sub-population may in turn be split an indefinite number of times until the splitting process terminates after a particular stopping criterion is reached. [4]
+
+```{r echo=TRUE, cache=TRUE}
+tree.fit <- train(classe ~. , method="rpart", data=trainingData)
+prediccion.tree <- predict(tree.fit,newdata=trainingData)
+fancyRpartPlot(tree.fit$finalModel)
+
+```
+
+We can see the decision tree above.
+```{r}
+(conf.tree <- confusionMatrix(prediccion.tree,trainingData[,"classe"]) )
+```
+And some statistics about this model. For example, we have achieved a bad accuracy (```r conf.tree$overall[1]```) and no information rate of (```r conf.tree$overall[5]```)  
+
+## Random forest
+Random forests or random decision forests are an ensemble learning method for classification, regression and other tasks that operate by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes (classification) or mean/average prediction (regression) of the individual trees.[5]
+```{r echo=TRUE, cache=TRUE}
+fitControl <- trainControl(method = "cv", number = 5, allowParallel = TRUE)
+rf.fit <- train(classe ~ ., method="rf",data=trainingData,trControl = fitControl,ntree=500)
+prediccion.rf <- predict(rf.fit,newdata=trainingData)
+(conf.rf <- confusionMatrix(prediccion.rf,trainingData[,"classe"]) )
+```
+We have 'overfitted' our model, as we can see we have ```r conf.rf$overall[1]``` accuracy. We can predict all the classes from every sample.
+
+## Gradient Boosting
+Gradient boosting is a machine learning technique for regression and classification problems. It produces a prediction model in the form of an ensemble of weak prediction models, typically decision trees.[6]
+```{r echo=TRUE, cache=TRUE}
+gbm.fit <- train(classe ~ ., method="gbm",data=trainingData,trControl = fitControl, verbose=FALSE)
+prediccion.gbm <- predict(gbm.fit,newdata=trainingData)
+(conf.gbm <- confusionMatrix(prediccion.gbm,trainingData[,"classe"]) )
+```
+We will chose this model because we have a low in sample error of ```r (1-conf.gbm$overall[1])*100``` % and we have reduced the overfitting.
+
+```{r echo=TRUE, cache=TRUE}
+summary(gbm.fit)
+```
+We can see in the figure from above the relative influence of the variables.
+
+# Prediction
+
+Now that we have choosen our model we will predict the classe of the testing set.  
+
+```{r echo=TRUE, cache=TRUE}
+predict(gbm.fit,newdata=testingData)
+```
+
+# Bibliography 
+[1] [Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.](http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf)  
+[2] [Mandy Sidana. Intro to types of classification algorithms in Machine Learning(Feb 28, 2017)](https://medium.com/sifium/machine-learning-types-of-classification-9497bd4f2e14)  
+[3] [Harshdeep Singh, Understanding Gradient Boosting Machines(Nov 3, 2018)](https://towardsdatascience.com/understanding-gradient-boosting-machines-9be756fe76ab)  
+[4] [Recursive Partitioning, Wikipedia](https://en.wikipedia.org/wiki/Recursive_partitioning)  
+[5] [Random forests, Wikipedia](https://en.wikipedia.org/wiki/Random_forest)  
+[6] [Gradient Boosting, Wikipedia](https://en.wikipedia.org/wiki/Gradient_boosting)  

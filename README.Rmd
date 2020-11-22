@@ -18,16 +18,6 @@ library(doParallel)
 library(rpart.plot)
 cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
 registerDoParallel(cluster)
-
-data("mtcars")
-colorize <- function(x, color) {
-  if (knitr::is_latex_output()) {
-    sprintf("\\textcolor{%s}{%s}", color, x)
-  } else if (knitr::is_html_output()) {
-    sprintf("<span style='color: %s;'>%s</span>", color, 
-            x)
-  } else x
-}
 ```
 # Abstract
 
